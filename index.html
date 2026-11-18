@@ -1,0 +1,445 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STUDIO X</title>
+<style>
+:root{--bg:#090b12;--panel:#151b29;--line:#293246;--txt:#eef2ff;--muted:#8994aa;--a:#8b5cf6;--b:#22d3ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px Arial,sans-serif}
+header{padding:18px;background:#121622;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0}
+.logo{font-size:23px;font-weight:bold;letter-spacing:2px}
+.logo span{color:var(--b)}
+main{max-width:1100px;margin:auto;padding:14px;display:grid;grid-template-columns:1fr 280px;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin-bottom:14px}
+button{background:#273149;color:white;border:1px solid #45516b;padding:10px;border-radius:8px;margin:3px}
+button.primary{background:#7046df}
+button.record{background:#9b2445}
+input,select{background:#0c111c;color:white;padding:8px;border:1px solid #45516b;border-radius:7px}
+input[type=range]{width:100%;accent-color:#8b5cf6}
+h3{font-size:13px;color:#aeb9d0;text-transform:uppercase}
+.controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.track{border:1px solid #354057;border-radius:9px;margin:9px 0;padding:10px}
+.track strong{display:block;margin-bottom:8px}
+.track audio{width:100%;margin-top:8px}
+.fx{padding:10px 0;border-bottom:1px solid #354057}
+.fx label{display:flex;justify-content:space-between}
+.small{color:var(--muted);font-size:12px}
+#status{color:#22d3ee}
+@media(max-width:750px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo">STUDIO <span>X</span></div>
+ <span class="small">HOME STUDIO</span>
+</header>
+
+<main>
+<section>
+ <div class="panel">
+  <h3>Ma session</h3>
+  <div class="controls">
+   <label>BPM <input id="bpm" type="number" min="40" max="240" value="96"></label>
+   <label>Tonalité
+    <select id="key">
+     <option>Auto</option><option>Do</option><option>Ré</option>
+     <option>Mi</option><option>Fa</option><option>Sol</option>
+     <option>La</option><option>Si</option>
+    </select>
+   </label>
+   <button id="metro">Métronome OFF</button>
+  </div>
+  <hr>
+  <h3>Mes pistes</h3>
+  <div class="controls">
+   <button class="primary" id="import">Importer un audio</button>
+   <button id="add">+ Nouvelle piste</button>
+   <input id="files" type="file" accept="audio/*" multiple hidden>
+  </div>
+  <div id="tracks">
+   <div class="track">
+    <strong>Instrumentale</strong>
+    <span class="small">Importe ton premier fichier audio.</span>
+   </div>
+  </div>
+ </div>
+
+ <div class="panel">
+  <h3>Enregistrement vocal</h3>
+  <p id="status">Micro non activé</p>
+  <button class="primary" id="mic">Activer le micro</button>
+  <button class="record" id="rec">● Enregistrer</button>
+  <button id="stop">■ Arrêter</button>
+  <div id="recordings"></div>
+  <p class="small">Utilise un casque pour éviter que l'instrumentale soit reprise par le micro. Le micro nécessite une page sécurisée HTTPS.</p>
+ </div>
+</section>
+
+<aside>
+ <div class="panel">
+  <h3>Rack d'effets</h3>
+  <p class="small">Réglages d'aperçu de la session.</p>
+  <div id="effects"></div>
+ </div>
+ <div class="panel">
+  <h3>Console de mixage</h3>
+  <label>Volume général</label>
+  <input type="range" min="0" max="100" value="80">
+  <p class="small">Volume de sortie</p>
+  <button id="save">Sauvegarder les réglages</button>
+ </div>
+ <div class="panel">
+  <h3>Aide</h3>
+  <p class="small">1. Importe une instrumentale.</p>
+  <p class="small">2. Ajoute une piste.</p>
+  <p class="small">3. Active le micro.</p>
+  <p class="small">4. Enregistre ta voix avec ton casque.</p>
+  <p class="small">5. Télécharge tes prises audio.</p>
+ </div>
+</aside>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let micStream=null,recorder=null,chunks=[],metroTimer=null,metroOn=false;
+
+$("import").onclick=()=>$("files").click();
+
+$("files").onchange=e=>{
+ for(const file of e.target.files){
+  const url=URL.createObjectURL(file);
+  const box=document.createElement("div");
+  box.className="track";
+  const name=document.createElement("strong");
+  name.textContent=file.name;
+  const audio=document.createElement("audio");
+  audio.controls=true;
+  audio.src=url;
+  const download=document.createElement("a");
+  download.href=url;
+  download.download=file.name;
+  download.textContent="Télécharger";
+  box.append(name,audio,download);
+  $("tracks").append(box);
+ }
+ e.target.value="";
+};
+
+$("add").onclick=()=>{
+ const box=document.createElement("div");
+ box.className="track";
+ box.innerHTML="<strong>Nouvelle piste</strong><span class='small'>Piste prête à recevoir un enregistrement.</span>";
+ $("tracks").append(box);
+};
+
+$("mic").onclick=async()=>{
+ try{
+  micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+  $("status").textContent="Micro activé ✓";
+ }catch(e){
+  $("status").textContent="Micro inaccessible. Vérifie les autorisations Chrome et HTTPS.";
+ }
+};
+
+$("rec").onclick=()=>{
+ if(!micStream){alert("Active d'abord le micro.");return;}
+ if(recorder&&recorder.state==="recording"){return;}
+ chunks=[];
+ recorder=new MediaRecorder(micStream);
+ recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ recorder.onstop=()=>{
+  const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="ma-prise-vocale.webm";
+  a.textContent="Télécharger ma prise vocale";
+  a.style.display="block";
+  a.style.padding="12px";
+  $("recordings").append(a);
+  const audio=document.createElement("audio");
+  audio.controls=true;
+  audio.src=url;
+  audio.style.width="100%";
+  $("recordings").append(audio);
+ };
+ recorder.start();
+ $("status").textContent="Enregistrement en cours...";
+};
+
+$("stop").onclick=()=>{
+ if(recorder&&recorder.state==="recording"){
+  recorder.stop();
+  $("status").textContent="Enregistrement terminé.";
+ }
+};
+
+$("metro").onclick=()=>{
+ metroOn=!metroOn;
+ $("metro").textContent="Métronome "+(metroOn?"ON":"OFF");
+ if(metroOn){
+  const tick=()=>{
+   const C=window.AudioContext||window.webkitAudioContext;
+   const c=new C();
+   const o=c.createOscillator(),g=c.createGain();
+   o.frequency.value=1000;
+   g.gain.value=.08;
+   o.connect(g);g.connect(c.destination);
+   o.start();o.stop(c.currentTime+.08);
+   setTimeout(()=>c.close(),150);
+  };
+  tick();
+  metroTimer=setInterval(tick,60000/Math.max(40,Math.min(240,+$("bpm").value||96)));
+ }else clearInterval(metroTimer);
+};
+
+const fx=["Auto-Tune","Réverbération","Delay","Égaliseur (EQ)","Compression","De-esser"];
+fx.forEach(name=>{
+ const d=document.createElement("div");
+ d.className="fx";
+ d.innerHTML="<label><strong>"+name+"</strong><input type='checkbox'></label><input type='range' min='0' max='100' value='35'>";
+ $("effects").append(d);
+});
+
+$("save").onclick=()=>{
+ const data={
+  bpm:$("bpm").value,
+  key:$("key").value,
+  effects:fx
+ };
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");
+ a.href=url;
+ a.download="studio-x-reglages.json";
+ a.click();
+};
+
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STUDIO X</title>
+<style>
+:root{--bg:#090b12;--panel:#151b29;--line:#293246;--txt:#eef2ff;--muted:#8994aa;--a:#8b5cf6;--b:#22d3ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px Arial,sans-serif}
+header{padding:18px;background:#121622;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0}
+.logo{font-size:23px;font-weight:bold;letter-spacing:2px}
+.logo span{color:var(--b)}
+main{max-width:1100px;margin:auto;padding:14px;display:grid;grid-template-columns:1fr 280px;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin-bottom:14px}
+button{background:#273149;color:white;border:1px solid #45516b;padding:10px;border-radius:8px;margin:3px}
+button.primary{background:#7046df}
+button.record{background:#9b2445}
+input,select{background:#0c111c;color:white;padding:8px;border:1px solid #45516b;border-radius:7px}
+input[type=range]{width:100%;accent-color:#8b5cf6}
+h3{font-size:13px;color:#aeb9d0;text-transform:uppercase}
+.controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.track{border:1px solid #354057;border-radius:9px;margin:9px 0;padding:10px}
+.track strong{display:block;margin-bottom:8px}
+.track audio{width:100%;margin-top:8px}
+.fx{padding:10px 0;border-bottom:1px solid #354057}
+.fx label{display:flex;justify-content:space-between}
+.small{color:var(--muted);font-size:12px}
+#status{color:#22d3ee}
+@media(max-width:750px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo">STUDIO <span>X</span></div>
+ <span class="small">HOME STUDIO</span>
+</header>
+
+<main>
+<section>
+ <div class="panel">
+  <h3>Ma session</h3>
+  <div class="controls">
+   <label>BPM <input id="bpm" type="number" min="40" max="240" value="96"></label>
+   <label>Tonalité
+    <select id="key">
+     <option>Auto</option><option>Do</option><option>Ré</option>
+     <option>Mi</option><option>Fa</option><option>Sol</option>
+     <option>La</option><option>Si</option>
+    </select>
+   </label>
+   <button id="metro">Métronome OFF</button>
+  </div>
+  <hr>
+  <h3>Mes pistes</h3>
+  <div class="controls">
+   <button class="primary" id="import">Importer un audio</button>
+   <button id="add">+ Nouvelle piste</button>
+   <input id="files" type="file" accept="audio/*" multiple hidden>
+  </div>
+  <div id="tracks">
+   <div class="track">
+    <strong>Instrumentale</strong>
+    <span class="small">Importe ton premier fichier audio.</span>
+   </div>
+  </div>
+ </div>
+
+ <div class="panel">
+  <h3>Enregistrement vocal</h3>
+  <p id="status">Micro non activé</p>
+  <button class="primary" id="mic">Activer le micro</button>
+  <button class="record" id="rec">● Enregistrer</button>
+  <button id="stop">■ Arrêter</button>
+  <div id="recordings"></div>
+  <p class="small">Utilise un casque pour éviter que l'instrumentale soit reprise par le micro. Le micro nécessite une page sécurisée HTTPS.</p>
+ </div>
+</section>
+
+<aside>
+ <div class="panel">
+  <h3>Rack d'effets</h3>
+  <p class="small">Réglages d'aperçu de la session.</p>
+  <div id="effects"></div>
+ </div>
+ <div class="panel">
+  <h3>Console de mixage</h3>
+  <label>Volume général</label>
+  <input type="range" min="0" max="100" value="80">
+  <p class="small">Volume de sortie</p>
+  <button id="save">Sauvegarder les réglages</button>
+ </div>
+ <div class="panel">
+  <h3>Aide</h3>
+  <p class="small">1. Importe une instrumentale.</p>
+  <p class="small">2. Ajoute une piste.</p>
+  <p class="small">3. Active le micro.</p>
+  <p class="small">4. Enregistre ta voix avec ton casque.</p>
+  <p class="small">5. Télécharge tes prises audio.</p>
+ </div>
+</aside>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let micStream=null,recorder=null,chunks=[],metroTimer=null,metroOn=false;
+
+$("import").onclick=()=>$("files").click();
+
+$("files").onchange=e=>{
+ for(const file of e.target.files){
+  const url=URL.createObjectURL(file);
+  const box=document.createElement("div");
+  box.className="track";
+  const name=document.createElement("strong");
+  name.textContent=file.name;
+  const audio=document.createElement("audio");
+  audio.controls=true;
+  audio.src=url;
+  const download=document.createElement("a");
+  download.href=url;
+  download.download=file.name;
+  download.textContent="Télécharger";
+  box.append(name,audio,download);
+  $("tracks").append(box);
+ }
+ e.target.value="";
+};
+
+$("add").onclick=()=>{
+ const box=document.createElement("div");
+ box.className="track";
+ box.innerHTML="<strong>Nouvelle piste</strong><span class='small'>Piste prête à recevoir un enregistrement.</span>";
+ $("tracks").append(box);
+};
+
+$("mic").onclick=async()=>{
+ try{
+  micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+  $("status").textContent="Micro activé ✓";
+ }catch(e){
+  $("status").textContent="Micro inaccessible. Vérifie les autorisations Chrome et HTTPS.";
+ }
+};
+
+$("rec").onclick=()=>{
+ if(!micStream){alert("Active d'abord le micro.");return;}
+ if(recorder&&recorder.state==="recording"){return;}
+ chunks=[];
+ recorder=new MediaRecorder(micStream);
+ recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ recorder.onstop=()=>{
+  const blob=new Blob(chunks,{type:recorder.mimeType||"audio/webm"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="ma-prise-vocale.webm";
+  a.textContent="Télécharger ma prise vocale";
+  a.style.display="block";
+  a.style.padding="12px";
+  $("recordings").append(a);
+  const audio=document.createElement("audio");
+  audio.controls=true;
+  audio.src=url;
+  audio.style.width="100%";
+  $("recordings").append(audio);
+ };
+ recorder.start();
+ $("status").textContent="Enregistrement en cours...";
+};
+
+$("stop").onclick=()=>{
+ if(recorder&&recorder.state==="recording"){
+  recorder.stop();
+  $("status").textContent="Enregistrement terminé.";
+ }
+};
+
+$("metro").onclick=()=>{
+ metroOn=!metroOn;
+ $("metro").textContent="Métronome "+(metroOn?"ON":"OFF");
+ if(metroOn){
+  const tick=()=>{
+   const C=window.AudioContext||window.webkitAudioContext;
+   const c=new C();
+   const o=c.createOscillator(),g=c.createGain();
+   o.frequency.value=1000;
+   g.gain.value=.08;
+   o.connect(g);g.connect(c.destination);
+   o.start();o.stop(c.currentTime+.08);
+   setTimeout(()=>c.close(),150);
+  };
+  tick();
+  metroTimer=setInterval(tick,60000/Math.max(40,Math.min(240,+$("bpm").value||96)));
+ }else clearInterval(metroTimer);
+};
+
+const fx=["Auto-Tune","Réverbération","Delay","Égaliseur (EQ)","Compression","De-esser"];
+fx.forEach(name=>{
+ const d=document.createElement("div");
+ d.className="fx";
+ d.innerHTML="<label><strong>"+name+"</strong><input type='checkbox'></label><input type='range' min='0' max='100' value='35'>";
+ $("effects").append(d);
+});
+
+$("save").onclick=()=>{
+ const data={
+  bpm:$("bpm").value,
+  key:$("key").value,
+  effects:fx
+ };
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");
+ a.href=url;
+ a.download="studio-x-reglages.json";
+ a.click();
+};
+
+</script>
+</body>
+</html>
